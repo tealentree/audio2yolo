@@ -6,139 +6,155 @@ import soundfile as sf
 import glob
 import warnings
 
-# Ignorujemy ostrzeżenia librosa
+# Suppress librosa warnings for cleaner console output
 warnings.filterwarnings('ignore')
 
-# --- 1. KONFIGURACJA STRUKTURY I KLAS ---
-FOLDER_WEJSCIOWY = "1_raw_audio/targets"
-PLIK_DRONA = "1_raw_audio/backgrounds/drone-sound.wav"
-FOLDER_WYJSCIOWY = "2_processed_audio"
+# --- 1. CONFIGURATION ---
+INPUT_FOLDER = "1_raw_audio/targets"
+DRONE_BG_FILE = "1_raw_audio/backgrounds/drone-sound.wav"
+OUTPUT_FOLDER = "2_processed_audio"
 
-DLUGOSC_SEK = 30.0
-SR = 44100
-ILOSC_WERSJI = 5  # Ile 30-sekundowych próbek wygenerować dla każdej klasy
+SAMPLE_DURATION_SEC = 30.0
+SAMPLE_RATE = 44100
+VERSIONS_PER_CLASS = 5
 
-# Słownik definiujący zasady dla poszczególnych folderów
-KLASY_DZWIEKOW = {
-    "woda": {"typ": "ciagly"},
-    "pozar": {"typ": "ciagly"},
-    "kolumna": {"typ": "ciagly"},
-    "krab": {"typ": "przerywany", "liczba": 5},
-    "bomba": {"typ": "przerywany", "liczba": 5},
-    "karabin": {"typ": "przerywany", "liczba": 3}
+# Class definitions: types and required event counts
+# Note: Folder names in '1_raw_audio/targets' must match these keys exactly.
+AUDIO_CLASSES = {
+    "woda": {"type": "continuous"},
+    "pozar": {"type": "continuous"},
+    "kolumna": {"type": "continuous"},
+    "krab": {"type": "discrete", "count": 5},
+    "bomba": {"type": "discrete", "count": 5},
+    "karabin": {"type": "discrete", "count": 3}
 }
 
-def przygotuj_podklad_drona(calkowita_dlugosc_probki):
-    """Wczytuje i zapętla szum drona do 30 sekund."""
+def prepare_drone_background(total_samples):
+    """
+    Loads and loops the drone background noise to match the target sample duration.
+    Increases the base volume by a specified multiplier.
+    """
     try:
-        szum_drona, _ = librosa.load(PLIK_DRONA, sr=SR)
-        plotno = np.copy(szum_drona)
-        # Zapętlanie, jeśli nagranie jest za krótkie
-        while len(plotno) < calkowita_dlugosc_probki:
-            plotno = np.concatenate((plotno, plotno))
+        drone_noise, _ = librosa.load(DRONE_BG_FILE, sr=SAMPLE_RATE)
+        background_canvas = np.copy(drone_noise)
         
-        plotno = plotno[:calkowita_dlugosc_probki]
-        # TWOJA MODYFIKACJA: Podbicie głośności drona
-        plotno = plotno * 1.5 
-        return plotno
+        # Loop the audio if it is shorter than the required duration
+        while len(background_canvas) < total_samples:
+            background_canvas = np.concatenate((background_canvas, background_canvas))
+        
+        # Trim to exact required length
+        background_canvas = background_canvas[:total_samples]
+        
+        # Increase background volume
+        background_canvas = background_canvas * 1.5 
+        return background_canvas
+        
     except Exception as e:
-        print(f"❌ Błąd wczytywania szumu drona: {e}")
-        print(f"Upewnij się, że plik istnieje w: {PLIK_DRONA}")
+        print(f"Error loading drone background noise: {e}")
+        print(f"Please ensure the file exists at: {DRONE_BG_FILE}")
         return None
 
-def wczytaj_pule_dzwiekow(sciezka_folderu):
-    """Wczytuje wszystkie pliki .wav z danego folderu (np. wszystkie nagrania Kraba)."""
-    pliki_wav = glob.glob(os.path.join(sciezka_folderu, "*.wav"))
-    zaladowane = []
-    for plik in pliki_wav:
-        try:
-            dzwiek, _ = librosa.load(plik, sr=SR)
-            zaladowane.append(dzwiek)
-        except Exception as e:
-            print(f"Błąd ładowania {plik}: {e}")
-    return zaladowane
-
-def generuj_dataset():
-    calkowita_dlugosc_probki = int(DLUGOSC_SEK * SR)
+def load_audio_pool(folder_path):
+    """
+    Loads all .wav files from a specified directory into memory.
+    Returns a list of audio arrays.
+    """
+    wav_files = glob.glob(os.path.join(folder_path, "*.wav"))
+    loaded_audio = []
     
-    # 1. Przygotowanie tła
-    podklad_drona_bazowy = przygotuj_podklad_drona(calkowita_dlugosc_probki)
-    if podklad_drona_bazowy is None: return
+    for file_path in wav_files:
+        try:
+            audio_data, _ = librosa.load(file_path, sr=SAMPLE_RATE)
+            loaded_audio.append(audio_data)
+        except Exception as e:
+            print(f"Failed to load {file_path}: {e}")
+            
+    return loaded_audio
 
-    # 2. Główna pętla idąca przez wszystkie klasy zdefiniowane w słowniku
-    for nazwa_klasy, konfiguracja in KLASY_DZWIEKOW.items():
-        folder_zrodlowy = os.path.join(FOLDER_WEJSCIOWY, nazwa_klasy)
-        folder_docelowy = os.path.join(FOLDER_WYJSCIOWY, nazwa_klasy)
+def generate_dataset():
+    """
+    Main pipeline function to generate mixed audio datasets based on class configurations.
+    """
+    total_samples = int(SAMPLE_DURATION_SEC * SAMPLE_RATE)
+    
+    # 1. Prepare the base drone background
+    base_background = prepare_drone_background(total_samples)
+    if base_background is None:
+        return
+
+    # 2. Iterate through each defined audio class
+    for class_name, config in AUDIO_CLASSES.items():
+        source_folder = os.path.join(INPUT_FOLDER, class_name)
+        target_folder = os.path.join(OUTPUT_FOLDER, class_name)
         
-        # Wczytujemy wszystkie dostępne warianty dźwięków dla danej klasy
-        pula_dzwiekow = wczytaj_pule_dzwiekow(folder_zrodlowy)
+        # Load all available source variations for the current class
+        audio_pool = load_audio_pool(source_folder)
         
-        if not pula_dzwiekow:
-            print(f"⚠️ Pomijam klasę '{nazwa_klasy}': Brak plików .wav w {folder_zrodlowy}")
+        if not audio_pool:
+            print(f"Skipping class '{class_name}': No .wav files found in {source_folder}")
             continue
 
-        os.makedirs(folder_docelowy, exist_ok=True)
-        print(f"\n⚙️ Przetwarzam klasę: {nazwa_klasy.upper()} (Typ: {konfiguracja['typ']}, Źródeł: {len(pula_dzwiekow)})")
+        os.makedirs(target_folder, exist_ok=True)
+        print(f"\nProcessing class: {class_name.upper()} (Type: {config['type']}, Sources found: {len(audio_pool)})")
         
-        for i in range(ILOSC_WERSJI):
-            # Kopia czystego podkładu z drona na nową próbkę
-            plotno = np.copy(podklad_drona_bazowy)
+        for version_idx in range(VERSIONS_PER_CLASS):
+            # Create a fresh copy of the background for this specific variation
+            canvas = np.copy(base_background)
             
-            # --- LOGIKA DLA DŹWIĘKÓW CIĄGŁYCH (Woda, Pożar, Kolumna) ---
-            if konfiguracja["typ"] == "ciagly":
-                # Losujemy jedno nagranie z folderu
-                dzwiek_celu = random.choice(pula_dzwiekow)
-                dzwiek_ciagly = np.copy(dzwiek_celu)
+            # --- LOGIC FOR CONTINUOUS SOUNDS (Water, Fire, Convoy) ---
+            if config["type"] == "continuous":
+                target_audio = random.choice(audio_pool)
+                continuous_audio = np.copy(target_audio)
                 
-                # Zapętlamy dźwięk celu, żeby grał przez całe 30 sekund
-                while len(dzwiek_ciagly) < calkowita_dlugosc_probki:
-                    dzwiek_ciagly = np.concatenate((dzwiek_ciagly, dzwiek_ciagly))
-                dzwiek_ciagly = dzwiek_ciagly[:calkowita_dlugosc_probki]
+                # Loop target audio to fill the 30-second duration
+                while len(continuous_audio) < total_samples:
+                    continuous_audio = np.concatenate((continuous_audio, continuous_audio))
                 
-                # TWOJA MODYFIKACJA: Zmieniona głośność
-                glosnosc = random.uniform(0.1, 0.7)
-                plotno += (dzwiek_ciagly * glosnosc)
+                continuous_audio = continuous_audio[:total_samples]
+                
+                # Apply random volume modifier simulating distance
+                volume_modifier = random.uniform(0.1, 0.7)
+                canvas += (continuous_audio * volume_modifier)
 
-            # --- LOGIKA DLA DŹWIĘKÓW PRZERYWANYCH (Krab, Bomba, Karabin) ---
-            elif konfiguracja["typ"] == "przerywany":
-                liczba_zdarzen = konfiguracja["liczba"]
-                rozmiar_segmentu = calkowita_dlugosc_probki // liczba_zdarzen
+            # --- LOGIC FOR DISCRETE SOUNDS (Krab, Bomb, Machine Gun) ---
+            elif config["type"] == "discrete":
+                event_count = config["count"]
+                segment_size = total_samples // event_count
                 
-                for j in range(liczba_zdarzen):
-                    # Wylosowanie dźwięku (dla każdego strzału może być inny z folderu!)
-                    dzwiek_celu = random.choice(pula_dzwiekow)
-                    dlugosc_celu = len(dzwiek_celu)
+                for event_idx in range(event_count):
+                    target_audio = random.choice(audio_pool)
+                    audio_length = len(target_audio)
                     
-                    # TWOJA MODYFIKACJA: Zmieniona głośność strzału
-                    glosnosc_strzalu = random.uniform(0.1, 0.7)
-                    zmodyfikowany_dzwiek = dzwiek_celu * glosnosc_strzalu
+                    event_volume = random.uniform(0.1, 0.7)
+                    modified_audio = target_audio * event_volume
                     
-                    margines_na_koncu = rozmiar_segmentu - dlugosc_celu
-                    start_w_segmencie = random.randint(0, margines_na_koncu) if margines_na_koncu > 0 else 0
+                    # Calculate random start position within the current time segment
+                    end_margin = segment_size - audio_length
+                    segment_start_idx = random.randint(0, end_margin) if end_margin > 0 else 0
                         
-                    start_calkowity = (j * rozmiar_segmentu) + start_w_segmencie
-                    koniec_calkowity = start_calkowity + dlugosc_celu
+                    absolute_start_idx = (event_idx * segment_size) + segment_start_idx
+                    absolute_end_idx = absolute_start_idx + audio_length
                     
-                    if koniec_calkowity > calkowita_dlugosc_probki:
-                        dostepne_miejsce = calkowita_dlugosc_probki - start_calkowity
-                        plotno[start_calkowity:calkowita_dlugosc_probki] += zmodyfikowany_dzwiek[:dostepne_miejsce]
+                    # Ensure the audio overlay doesn't exceed the total canvas length
+                    if absolute_end_idx > total_samples:
+                        available_space = total_samples - absolute_start_idx
+                        canvas[absolute_start_idx:total_samples] += modified_audio[:available_space]
                     else:
-                        plotno[start_calkowity:koniec_calkowity] += zmodyfikowany_dzwiek
+                        canvas[absolute_start_idx:absolute_end_idx] += modified_audio
 
-            # --- ZABEZPIECZENIE I ZAPIS ---
-            # Jeśli nałożenie drona (*1.5) i strzału (*0.7) przekroczy cyfrowe maksimum głośności (1.0),
-            # wyciszamy całość proporcjonalnie, żeby uniknąć trzasków sprzętowych (Clipping)
-            max_val = np.max(np.abs(plotno))
-            if max_val > 1.0:
-                plotno = plotno / max_val 
+            # --- CLIPPING PREVENTION & EXPORT ---
+            # Normalize the waveform if the mixed audio exceeds the digital maximum (1.0)
+            max_amplitude = np.max(np.abs(canvas))
+            if max_amplitude > 1.0:
+                canvas = canvas / max_amplitude 
 
-            nazwa_pliku = f"{nazwa_klasy}_wersja_{i+1}.wav"
-            sciezka_wyjsciowa = os.path.join(folder_docelowy, nazwa_pliku)
-            sf.write(sciezka_wyjsciowa, plotno, SR)
-            print(f"  ✅ Zapisano: {nazwa_pliku}")
+            output_filename = f"{class_name}_version_{version_idx + 1}.wav"
+            output_filepath = os.path.join(target_folder, output_filename)
+            
+            sf.write(output_filepath, canvas, SAMPLE_RATE)
+            print(f"  [Saved] {output_filename}")
 
-# --- URUCHOMIENIE ---
 if __name__ == "__main__":
-    print("Rozpoczynam pracę na strukturze plików 1_raw_audio -> 2_processed_audio")
-    generuj_dataset()
-    print("\n🎉 Zakończono generowanie wszystkich klas!")
+    print("Starting audio processing pipeline: 1_raw_audio -> 2_processed_audio")
+    generate_dataset()
+    print("\nDataset generation completed successfully.")

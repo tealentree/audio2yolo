@@ -1,0 +1,16 @@
+# Moduł Detekcji Akustycznej (UAV) 🚁🔊
+
+Projekt automatycznego generowania i przetwarzania datasetu audio (Dźwięki ciągłe i przerywane) dla drona z matrycą MEMS, przygotowujący dane do uczenia modelu YOLOv8.
+
+## Jak używać tego repozytorium?
+
+1. Sklonuj repozytorium na swój komputer.
+2. Zbuduj początkową strukturę folderów dla surowych plików wrzucając ten kod w terminal (lub stwórz je ręcznie):
+   `mkdir -p 1_raw_audio/backgrounds`
+   `mkdir -p 1_raw_audio/targets/{woda,pozar,kolumna,krab,bomba,karabin}`
+3. Do folderu `1_raw_audio/backgrounds/` wrzuć plik `drone-sound.wav`.
+4. Do odpowiednich folderów w `1_raw_audio/targets/` wrzuć czyste nagrania źródłowe.
+5. Uruchom główny pipeline:
+   `python scripts/3_run_pipeline.py`
+
+Skrypt automatycznie wygeneruje 30-sekundowe zaszumione miksy (w folderze `2_processed_audio`), a następnie zamieni je na gotowe do treningu Mel-spektrogramy (w folderze `3_spectrograms`).

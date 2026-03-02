@@ -3,55 +3,57 @@ import sys
 import os
 import time
 
-def uruchom_skrypt(nazwa_skryptu):
+def run_script(script_name):
     """
-    Uruchamia podany skrypt Pythona jako osobny proces i przechwytuje jego działanie.
+    Executes a given Python script as a separate process and monitors its execution.
+    Halts the entire pipeline if a critical error occurs.
     """
     print(f"\n{'='*55}")
-    print(f"🚀 ROZPOCZYNAM ETAP: {nazwa_skryptu}")
+    print(f"[STARTING STAGE] {script_name}")
     print(f"{'='*55}\n")
     
     try:
-        # sys.executable to bezpieczny sposób na wywołanie dokładnie tego samego Pythona, 
-        # którego używasz obecnie (ważne, jeśli masz np. wirtualne środowisko venv)
-        sciezka_do_skryptu = os.path.join("scripts", nazwa_skryptu)
+        # sys.executable ensures we use the exact same Python interpreter currently running
+        # This is crucial when working within virtual environments (e.g., venv)
+        script_path = os.path.join("scripts", script_name)
         
-        subprocess.run([sys.executable, sciezka_do_skryptu], check=True)
+        # run() with check=True will automatically raise a CalledProcessError if the script fails
+        subprocess.run([sys.executable, script_path], check=True)
         
-        print(f"\n✅ ETAP ZAKOŃCZONY SUKCESEM: {nazwa_skryptu}")
+        print(f"\n[STAGE COMPLETED] {script_name}")
         
     except subprocess.CalledProcessError as e:
-        # Jeśli skrypt wewnątrz rzuci błędem, pipeline zostanie bezpiecznie zatrzymany
-        print(f"\n❌ BŁĄD KRYTYCZNY: Skrypt '{nazwa_skryptu}' uległ awarii (kod błędu: {e.returncode}).")
-        print("Zatrzymuję pipeline, aby nie generować błędnych danych.")
+        # Safely halt the pipeline if a subprocess script fails
+        print(f"\n[CRITICAL ERROR] Script '{script_name}' crashed (exit code: {e.returncode}).")
+        print("Halting the pipeline to prevent the generation of corrupted or incomplete data.")
         sys.exit(1)
         
     except FileNotFoundError:
-        print(f"\n❌ NIE ZNALEZIONO SKRYPTU: '{sciezka_do_skryptu}'.")
-        print("⚠️ Pamiętaj, aby uruchamiać run_pipeline.py z GŁÓWNEGO folderu projektu!")
+        print(f"\n[FILE NOT FOUND] Cannot locate script: '{script_path}'.")
+        print("Note: Ensure you are running 3_run_pipeline.py from the ROOT directory of the project.")
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🤖 Uruchamiam zautomatyzowany Pipeline Generowania Datasetu...")
-    czas_start = time.time()
+    print("Initializing automated Dataset Generation Pipeline...")
+    start_time = time.time()
     
-    # Lista skryptów do wykonania w sztywnej kolejności
-    kolejnosc_wykonywania = [
+    # List of scripts to execute in strict chronological order
+    execution_order = [
         "1_generate_audio.py",
         "2_generate_spectograms.py"
     ]
     
-    # Wykonujemy skrypty pętla po pętli
-    for skrypt in kolejnosc_wykonywania:
-        uruchom_skrypt(skrypt)
-        # Krótka pauza dla stabilności systemu plików
+    # Execute scripts sequentially
+    for script in execution_order:
+        run_script(script)
+        # Brief pause to ensure file system stability between heavy I/O operations
         time.sleep(1) 
         
-    czas_stop = time.time()
-    czas_trwania = round(czas_stop - czas_start, 2)
+    end_time = time.time()
+    total_duration = round(end_time - start_time, 2)
     
     print(f"\n{'='*55}")
-    print(f"🎉 PIPELINE ZAKOŃCZONY W 100% SUKCESEM!")
-    print(f"⏱️ Całkowity czas generowania: {czas_trwania} sekund.")
+    print(f"[PIPELINE SUCCESS] All stages completed successfully.")
+    print(f"Total processing time: {total_duration} seconds.")
     print(f"{'='*55}")
-    print("Twój pełny dataset znajduje się w folderze '3_spectrograms'.")
+    print("Your complete image dataset is now available in the '3_spectrograms' directory.")

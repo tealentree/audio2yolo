@@ -6,83 +6,91 @@ import os
 import glob
 import warnings
 
-# Ignorujemy ostrzeżenia (np. o braku PySoundFile dla niektórych formatów), żeby konsola była czytelna
+# Suppress warnings (e.g., missing PySoundFile for certain formats) to keep the console clean
 warnings.filterwarnings('ignore')
 
-def audio_to_melspectrogram(audio_path, output_path, sr=44100, n_mels=128):
+def generate_mel_spectrogram(audio_path, output_path, sr=44100, n_mels=128):
     """
-    Konwertuje plik audio (.wav) na obraz Mel-spektrogramu (.png).
-    Obraz jest "czysty" (brak osi i ramek) - idealny dla sieci YOLO.
+    Converts an audio file (.wav) into a Mel-spectrogram image (.png).
+    The resulting image is clean (no axes, no borders), optimized for YOLO/CNN training.
     """
     try:
+        # Load audio file
         y, sr = librosa.load(audio_path, sr=sr)
         
+        # Compute the Mel-spectrogram
         mel_spect = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=2048, hop_length=512, n_mels=n_mels)
+        
+        # Convert power to decibels (logarithmic scale)
         mel_spect_db = librosa.power_to_db(mel_spect, ref=np.max)
         
+        # Configure the plot (remove axes and borders)
         plt.figure(figsize=(10, 4), frameon=False)
         plt.axis('off')
         
+        # Display the spectrogram using the 'magma' colormap
         librosa.display.specshow(mel_spect_db, sr=sr, hop_length=512, x_axis='time', y_axis='mel', cmap='magma')
         
+        # Save the image without padding or transparent background issues
         plt.savefig(output_path, bbox_inches='tight', pad_inches=0, transparent=True)
-        plt.close() # Zwolnienie pamięci - MEGA ważne przy pętli!
+        
+        # Free memory (critical when processing thousands of files in a loop)
+        plt.close()
         
     except Exception as e:
-        print(f"❌ Błąd podczas przetwarzania pliku {audio_path}: {e}")
+        print(f"Error processing file {audio_path}: {e}")
 
-def konwertuj_wszystkie_klasy(folder_bazowy_wejscie, folder_bazowy_wyjscie):
+def process_all_classes(base_input_folder, base_output_folder):
     """
-    Skanuje główny folder wejściowy, znajduje wszystkie podfoldery (klasy),
-    a następnie konwertuje znajdujące się w nich pliki .wav na spektrogramy .png
-    z zachowaniem struktury katalogów.
+    Scans the base input folder, finds all class subdirectories,
+    and converts their .wav files into .png spectrograms while maintaining the directory structure.
     """
-    if not os.path.exists(folder_bazowy_wejscie):
-        print(f"⚠️ Błąd: Folder wejściowy '{folder_bazowy_wejscie}' nie istnieje!")
+    if not os.path.exists(base_input_folder):
+        print(f"Error: Input directory '{base_input_folder}' does not exist.")
         return
 
-    # Pobranie listy wszystkich podfolderów (np. ['krab', 'bomba', 'woda', ...])
-    podfoldery_klas = [f for f in os.listdir(folder_bazowy_wejscie) 
-                       if os.path.isdir(os.path.join(folder_bazowy_wejscie, f))]
+    # Retrieve a list of all subdirectories (e.g., ['krab', 'bomba', 'woda', ...])
+    class_subfolders = [f for f in os.listdir(base_input_folder) 
+                        if os.path.isdir(os.path.join(base_input_folder, f))]
 
-    if not podfoldery_klas:
-        print(f"⚠️ Nie znaleziono żadnych podfolderów w '{folder_bazowy_wejscie}'.")
+    if not class_subfolders:
+        print(f"Warning: No subdirectories found in '{base_input_folder}'.")
         return
 
-    print(f"Znaleziono {len(podfoldery_klas)} klas do przetworzenia: {podfoldery_klas}")
+    print(f"Found {len(class_subfolders)} classes to process: {class_subfolders}")
 
-    # Pętla przez każdą klasę (folder)
-    for klasa in podfoldery_klas:
-        sciezka_wejsciowa_klasy = os.path.join(folder_bazowy_wejscie, klasa)
-        sciezka_wyjsciowa_klasy = os.path.join(folder_bazowy_wyjscie, klasa)
+    # Iterate through each class folder
+    for class_name in class_subfolders:
+        class_input_path = os.path.join(base_input_folder, class_name)
+        class_output_path = os.path.join(base_output_folder, class_name)
         
-        # Tworzymy folder docelowy dla danej klasy (np. 3_spectrograms/krab)
-        os.makedirs(sciezka_wyjsciowa_klasy, exist_ok=True)
+        # Create target directory for the class
+        os.makedirs(class_output_path, exist_ok=True)
         
-        sciezki_wav = glob.glob(os.path.join(sciezka_wejsciowa_klasy, "*.wav"))
-        liczba_plikow = len(sciezki_wav)
+        wav_files = glob.glob(os.path.join(class_input_path, "*.wav"))
+        file_count = len(wav_files)
         
-        if liczba_plikow == 0:
-            print(f"⚠️ Pomijam klasę '{klasa}': Brak plików .wav")
+        if file_count == 0:
+            print(f"Skipping class '{class_name}': No .wav files found.")
             continue
             
-        print(f"\n⚙️ Konwertowanie klasy '{klasa}' ({liczba_plikow} plików)...")
+        print(f"\nProcessing class '{class_name}' ({file_count} files)...")
         
-        # Pętla przetwarzająca pliki wewnątrz danej klasy
-        for index, sciezka_audio in enumerate(sciezki_wav, start=1):
-            nazwa_pliku = os.path.basename(sciezka_audio)
-            nazwa_png = os.path.splitext(nazwa_pliku)[0] + ".png"
-            sciezka_wyjsciowa = os.path.join(sciezka_wyjsciowa_klasy, nazwa_png)
+        # Process each audio file within the class
+        for index, audio_path in enumerate(wav_files, start=1):
+            file_name = os.path.basename(audio_path)
+            png_name = os.path.splitext(file_name)[0] + ".png"
+            output_path = os.path.join(class_output_path, png_name)
             
-            audio_to_melspectrogram(sciezka_audio, sciezka_wyjsciowa)
-            print(f"  [{index}/{liczba_plikow}] ✅ Zapisano: {nazwa_png}")
+            generate_mel_spectrogram(audio_path, output_path)
+            print(f"  [{index}/{file_count}] Saved: {png_name}")
 
-# --- Konfiguracja ścieżek i uruchomienie ---
+# --- Main Execution Block ---
 if __name__ == "__main__":
-    # Teraz podajemy główne foldery z naszej nowej struktury!
-    FOLDER_ZRODLOWY = "2_processed_audio" 
-    FOLDER_DOCELOWY = "3_spectrograms"
+    # Define the main directories based on the project pipeline structure
+    INPUT_FOLDER = "2_processed_audio" 
+    OUTPUT_FOLDER = "3_spectrograms"
     
-    print("Rozpoczynam generowanie spektrogramów...")
-    konwertuj_wszystkie_klasy(FOLDER_ZRODLOWY, FOLDER_DOCELOWY)
-    print("\n🎉 Zakończono! Dataset obrazkowy jest gotowy do etykietowania.")
+    print("Starting spectrogram generation pipeline...")
+    process_all_classes(INPUT_FOLDER, OUTPUT_FOLDER)
+    print("\nProcess completed successfully. Image dataset is ready for labeling.")
