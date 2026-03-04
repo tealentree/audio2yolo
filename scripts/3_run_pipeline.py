@@ -35,7 +35,7 @@ if __name__ == "__main__":
     # Lista skryptow do wykonania w kolejnosci
     execution_order = [
         "1_generate_audio.py",
-        "2_generate_spectograms.py"
+        "2_generate_spectrograms.py"
     ]
     
     for script in execution_order:

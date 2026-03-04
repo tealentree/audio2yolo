@@ -21,7 +21,7 @@ def delete_files_in_folder(folder_path):
     print(f"An error occurred while deleting files: {e}")
 
 def clean_all():
-  for folder_name in ["2_processed_audio", "3_spectograms"]:
+  for folder_name in ["2_processed_audio", "3_spectrograms"]:
     for subfolder_name in ["krab", "bomba", "woda", "pozar", "karabin", "kolumna"]:
       target_folder = os.path.join(folder_name, subfolder_name)
       delete_files_in_folder(target_folder)
