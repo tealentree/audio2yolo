@@ -5,6 +5,7 @@ import librosa
 import soundfile as sf
 import glob
 import warnings
+from scipy.signal import butter, filtfilt
 
 # Ignoruj warningi z librosy
 warnings.filterwarnings('ignore')
@@ -27,6 +28,18 @@ AUDIO_CLASSES = {
     "bomba": {"type": "przerywany", "count": 5},
     "karabin": {"type": "przerywany", "count": 3}
 }
+
+def bandpass_filter(audio, sr, low_freq=150, high_freq=10000):
+    """
+    Filtr pasmowo-przepustowy, przepuszczajacy tylko dzwieki o okreslonych czestotliwosciach.
+    Symuluje glosnik
+    """
+    nyq = 0.5 * sr
+    low = low_freq / nyq
+    high = high_freq / nyq
+    b, a = butter(4, [low, high], btype='band')
+
+    return filtfilt(b, a, audio)
 
 def prepare_drone_background(total_samples):
     """
@@ -64,11 +77,13 @@ def load_audio_pool(folder_path):
     for file_path in wav_files:
         try:
             audio_data, _ = librosa.load(file_path, sr=SAMPLE_RATE)
+            audio_data = bandpass_filter(audio_data, SAMPLE_RATE)
             loaded_audio.append(audio_data)
         except Exception as e:
             print(f"Failed to load {file_path}: {e}")
             
     return loaded_audio
+
 
 def generate_dataset():
     """
