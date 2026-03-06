@@ -14,6 +14,7 @@ warnings.filterwarnings('ignore')
 INPUT_FOLDER = "1_raw_audio/targets"
 DRONE_BG_FILE = "1_raw_audio/backgrounds/drone-sound.wav"
 OUTPUT_FOLDER = "2_processed_audio"
+TXT_OUTPUT_FOLDER = "2_processed_audio/sliced"
 
 SAMPLE_DURATION_SEC = 30.0
 SAMPLE_RATE = 44100
@@ -27,6 +28,15 @@ AUDIO_CLASSES = {
     "krab": {"type": "przerywany", "count": 5},
     "bomba": {"type": "przerywany", "count": 5},
     "karabin": {"type": "przerywany", "count": 3}
+}
+
+CLASS_TO_ID = {
+    "woda": 0,
+    "pozar": 1,
+    "kolumna": 2,
+    "krab": 3,
+    "bomba": 4,
+    "karabin": 5
 }
 
 def bandpass_filter(audio, sr, low_freq=150, high_freq=10000):
@@ -84,6 +94,53 @@ def load_audio_pool(folder_path):
             
     return loaded_audio
 
+def slice_into_windows(audio, window_size_sec=3.0, step_size_sec=1.0):
+    """
+    Dodaje efekt przesuwającego się okna dźwiękowego.
+    Okno jest nakładane na audio, aby stworzyć naturalny efekt odbierania dźwięku w czasie rzeczywistym.
+    """
+    audio_length = len(audio)
+    window_size_samples = int(window_size_sec * SAMPLE_RATE)
+    step_size_samples = int(step_size_sec * SAMPLE_RATE)
+
+    sliced_windows = []
+    timestamps = []
+
+    for start in range(0, audio_length, step_size_samples):
+        end = min(start + window_size_samples, audio_length)
+        sliced_windows.append(audio[start:end]) # Lista z pocietymi dzwiekami
+
+        timestamps.append(start / SAMPLE_RATE) # Lista z czasami poczatkow okien (w sekundach)
+    return sliced_windows, timestamps
+
+
+def calculate_yolo_bbox(window_start, window_end, event_start, event_end):
+    """
+    Oblicza współrzędne bounding boxa w formacie YOLO dla danego okna i zdarzenia.
+    Zwraca (x_center, y_center, width, height) znormalizowane do zakresu [0, 1].
+    """
+    window_duration = window_end - window_start
+    
+    if event_end <= window_start or event_start >= window_end:
+        return None
+    
+    visible_start = max(window_start, event_start)
+    visible_end = min(window_end, event_end)
+
+    rel_start = (visible_start - window_start) / window_duration
+    rel_end = (visible_end - window_start) / window_duration
+
+    x_center = (rel_start + rel_end) / 2.0
+    width = rel_end - rel_start
+    
+    y_center = 0.5
+    height = 1.0
+
+    if width < 0.05:
+        return None
+    
+    return x_center, y_center, width, height
+
 
 def generate_dataset():
     """
@@ -99,7 +156,8 @@ def generate_dataset():
     for class_name, config in AUDIO_CLASSES.items():
         source_folder = os.path.join(INPUT_FOLDER, class_name)
         target_folder = os.path.join(OUTPUT_FOLDER, class_name)
-        
+        txt_target_folder = os.path.join(TXT_OUTPUT_FOLDER, class_name)
+
         # Załaduj wszystkie dostępne próbki dźwiękowe dla tej klasy
         audio_pool = load_audio_pool(source_folder)
         
@@ -108,13 +166,17 @@ def generate_dataset():
             continue
 
         os.makedirs(target_folder, exist_ok=True)
+        os.makedirs(txt_target_folder, exist_ok=True)
         print(f"\nProcessing class: {class_name.upper()} (Type: {config['type']}, Sources found: {len(audio_pool)})")
         
         file_id = 0
         for audio_id in range(len(audio_pool)):
             for version_idx in range(VERSIONS_PER_CLASS):
                 canvas = np.copy(base_background)
-                
+                current_file_volume = random.uniform(0.1, 0.7)
+
+                event_registry = [] 
+
                 # --- LOGIKA DZWIEKOW CIAGLYCH ---
                 if config["type"] == "ciagly":
                     target_audio = audio_pool[audio_id]
@@ -124,11 +186,14 @@ def generate_dataset():
                         continuous_audio = np.concatenate((continuous_audio, continuous_audio))
                     
                     continuous_audio = continuous_audio[:total_samples]
-                    
-                    # Modyfikacja glosnosci dzwieku aby symulowac rozna odleglosc od zrodla
-                    event_volume = random.uniform(0.1, 1)
-                    canvas += (continuous_audio * event_volume)
+                    canvas += (continuous_audio * current_file_volume)
 
+                    # Rejestruje zdarzenia dla dźwięków ciągłych jako jedno zdarzenie trwające przez całą próbkę (format dla YOLO)
+                    event_registry.append({
+                        "class_id": CLASS_TO_ID[class_name],
+                        "start_sample": 0,
+                        "end_sample": total_samples
+                    })
                 # --- LOGIKA DZWIEKOW PRZERYWANYCH ---
                 elif config["type"] == "przerywany":
                     event_count = config["count"]
@@ -153,39 +218,49 @@ def generate_dataset():
                         else:
                             canvas[absolute_start_idx:absolute_end_idx] += modified_audio
 
+                        event_registry.append({
+                            "class_id": CLASS_TO_ID[class_name],
+                            "start_sample": absolute_start_idx,
+                            "end_sample": absolute_end_idx
+                        })
+
                 max_amplitude = np.max(np.abs(canvas))
                 if max_amplitude > 1.0:
                     canvas = canvas / max_amplitude 
 
-                output_audio, timestamps = slice_into_windows(canvas)
+                window_size_sec = 3.0
+                output_audio, timestamps = slice_into_windows(canvas, window_size_sec)
 
                 for idx, segment in enumerate(output_audio):
-                    output_filename = f"{class_name}_version_{file_id}_{idx}.wav"
-                    output_filepath = os.path.join(target_folder, output_filename)
-                    sf.write(output_filepath, segment, SAMPLE_RATE)
-                    print(f"  [Saved] {output_filename}")
+                    window_start_sec = timestamps[idx]
+                    window_end_sec = window_start_sec + window_size_sec
+
+                    base_filename = f"{class_name}_version_{file_id}_{idx}"
+
+                    wav_filepath = os.path.join(target_folder, base_filename + ".wav")
+                    sf.write(wav_filepath, segment, SAMPLE_RATE)
+
+                    yolo_labels = []
+
+                    for event in event_registry:
+                        event_start_sec = event["start_sample"] / SAMPLE_RATE
+                        event_end_sec = event["end_sample"] / SAMPLE_RATE
+                        class_id = event["class_id"]
+
+                        bbox = calculate_yolo_bbox(window_start_sec, window_end_sec, event_start_sec, event_end_sec)
+                        if bbox is not None:
+                            x_center, y_center, width, height = bbox
+                            label_line = f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n"
+                            yolo_labels.append(label_line)
+
+                    txt_filepath = os.path.join(txt_target_folder, base_filename + ".txt")
+                    with open(txt_filepath, 'w') as f:
+                        f.writelines(yolo_labels)
+
+                    print(f"[Saved] {base_filename}.wav and .txt ({len(yolo_labels)} events)")
                     
                 file_id += 1
 
-def slice_into_windows(audio, window_size_sec=3.0, step_size_sec=1.0):
-    """
-    Dodaje efekt przesuwającego się okna dźwiękowego.
-    Okno jest nakładane na audio, aby stworzyć naturalny efekt odbierania dźwięku w czasie rzeczywistym.
-    """
-    audio_length = len(audio)
-    window_size_samples = int(window_size_sec * SAMPLE_RATE)
-    step_size_samples = int(step_size_sec * SAMPLE_RATE)
-
-    sliced_windows = []
-    timestamps = []
-
-    for start in range(0, audio_length, step_size_samples):
-        end = min(start + window_size_samples, audio_length)
-        window_chunk = audio[start:end] 
-        sliced_windows.append(audio[start:end]) # Lista z pocietymi dzwiekami
-
-        timestamps.append(start / SAMPLE_RATE) # Lista z czasami poczatkow okien (w sekundach)
-    return sliced_windows, timestamps
 
 if __name__ == "__main__":
     print("Starting audio processing pipeline: 1_raw_audio -> 2_processed_audio")
