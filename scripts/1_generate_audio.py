@@ -17,7 +17,7 @@ OUTPUT_FOLDER = "2_processed_audio"
 
 SAMPLE_DURATION_SEC = 30.0
 SAMPLE_RATE = 44100
-VERSIONS_PER_CLASS = 3
+VERSIONS_PER_CLASS = 2
 
 # Definicja klas: typy i wymaganie ilości eventów dla dźwięków przerywanych
 AUDIO_CLASSES = {
@@ -157,12 +157,35 @@ def generate_dataset():
                 if max_amplitude > 1.0:
                     canvas = canvas / max_amplitude 
 
-                output_filename = f"{class_name}_version_{file_id}_{event_volume:.2f}.wav"
-                output_filepath = os.path.join(target_folder, output_filename)
-                
-                sf.write(output_filepath, canvas, SAMPLE_RATE)
-                print(f"  [Saved] {output_filename}")
+                output_audio, timestamps = slice_into_windows(canvas)
+
+                for idx, segment in enumerate(output_audio):
+                    output_filename = f"{class_name}_version_{file_id}_{idx}.wav"
+                    output_filepath = os.path.join(target_folder, output_filename)
+                    sf.write(output_filepath, segment, SAMPLE_RATE)
+                    print(f"  [Saved] {output_filename}")
+                    
                 file_id += 1
+
+def slice_into_windows(audio, window_size_sec=3.0, step_size_sec=1.0):
+    """
+    Dodaje efekt przesuwającego się okna dźwiękowego.
+    Okno jest nakładane na audio, aby stworzyć naturalny efekt odbierania dźwięku w czasie rzeczywistym.
+    """
+    audio_length = len(audio)
+    window_size_samples = int(window_size_sec * SAMPLE_RATE)
+    step_size_samples = int(step_size_sec * SAMPLE_RATE)
+
+    sliced_windows = []
+    timestamps = []
+
+    for start in range(0, audio_length, step_size_samples):
+        end = min(start + window_size_samples, audio_length)
+        window_chunk = audio[start:end] 
+        sliced_windows.append(audio[start:end]) # Lista z pocietymi dzwiekami
+
+        timestamps.append(start / SAMPLE_RATE) # Lista z czasami poczatkow okien (w sekundach)
+    return sliced_windows, timestamps
 
 if __name__ == "__main__":
     print("Starting audio processing pipeline: 1_raw_audio -> 2_processed_audio")
