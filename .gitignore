@@ -2,6 +2,8 @@
 2_processed_audio/
 3_spectrograms/
 4_yolo_dataset/
+runs/
+yolo26n.pt
 
 __pycache__/
 *.pyc

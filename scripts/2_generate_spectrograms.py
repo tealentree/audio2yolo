@@ -70,11 +70,10 @@ def process_all_classes(base_input_folder, base_output_folder):
             generate_mel_spectrogram(audio_path, output_path)
             print(f"  [{index}/{file_count}] Saved: {png_name}")
 
-
 if __name__ == "__main__":
     INPUT_FOLDER = "2_processed_audio" 
     OUTPUT_FOLDER = "3_spectrograms"
-    
+
     print("Starting spectrogram generation pipeline...")
     process_all_classes(INPUT_FOLDER, OUTPUT_FOLDER)
     print("\nProcess completed successfully. Image dataset is ready for labeling.")
