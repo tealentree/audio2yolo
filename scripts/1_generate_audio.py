@@ -90,12 +90,9 @@ def get_random_background(bg_pool, total_samples):
     background_canvas = background_canvas[start_idx:start_idx + total_samples]
     return background_canvas
     
-def prepare_drone_background(background_canvas, total_samples):
-    None
-
 def load_audio_pool(folder_path):
     """
-    Laduje wszystkie pliki .wav z podanego folderu i zwraca liste tablic audio.
+    Laduje wszystkie pliki .wav z podanego folderu i zwraca liste tupli (nazwa_pliku, tablica_audio).
     """
     wav_files = glob.glob(os.path.join(folder_path, "*.wav"))
     loaded_audio = []
@@ -104,7 +101,9 @@ def load_audio_pool(folder_path):
         try:
             audio_data, _ = librosa.load(file_path, sr=SAMPLE_RATE)
             audio_data = bandpass_filter(audio_data, SAMPLE_RATE)
-            loaded_audio.append(audio_data)
+            
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            loaded_audio.append((base_name, audio_data))
         except Exception as e:
             print(f"Failed to load {file_path}: {e}")
             
@@ -186,9 +185,14 @@ def generate_dataset():
         os.makedirs(labels_target_folder, exist_ok=True)
         print(f"\nProcessing class: {class_name.upper()} (Type: {config['type']}, Sources found: {len(audio_pool)})")
         
-        file_id = 0
-        for audio_id in range(len(audio_pool)):
+        for base_name, target_audio in audio_pool:
             for version_idx in range(VERSIONS_PER_CLASS):
+                
+                check_pattern = os.path.join(target_folder, f"{class_name}_{base_name}_v{version_idx}_*.wav")
+                if glob.glob(check_pattern):
+                    print(f"[Skip] {class_name} | {base_name} | wersja {version_idx} (juz istnieje)")
+                    continue
+                
                 canvas = get_random_background(bg_pool, total_samples)
                 current_file_volume = random.uniform(0.1, 0.7)
 
@@ -196,7 +200,6 @@ def generate_dataset():
 
                 # --- LOGIKA DZWIEKOW CIAGLYCH ---
                 if config["type"] == "ciagly":
-                    target_audio = audio_pool[audio_id]
                     continuous_audio = np.copy(target_audio)
 
                     while len(continuous_audio) < total_samples:
@@ -217,7 +220,6 @@ def generate_dataset():
                     segment_size = total_samples // event_count
 
                     for event_idx in range(event_count):
-                        target_audio = audio_pool[audio_id]
                         audio_length = len(target_audio)
                         
                         event_volume = random.uniform(0.1, 1.0)
@@ -252,7 +254,7 @@ def generate_dataset():
                     window_start_sec = timestamps[idx]
                     window_end_sec = window_start_sec + window_size_sec
 
-                    base_filename = f"{class_name}_version_{file_id}_{idx}"
+                    base_filename = f"{class_name}_{base_name}_v{version_idx}_{idx}"
 
                     wav_filepath = os.path.join(target_folder, base_filename + ".wav")
                     sf.write(wav_filepath, segment, SAMPLE_RATE)
@@ -274,9 +276,7 @@ def generate_dataset():
                     with open(txt_filepath, 'w') as f:
                         f.writelines(yolo_labels)
 
-                    print(f"[Saved] {base_filename}.wav and .txt ({len(yolo_labels)} events)")
-                    
-                file_id += 1
+                    print(f"[Saved] {class_name} | {base_filename} | version {version_idx}")
 
 
 if __name__ == "__main__":

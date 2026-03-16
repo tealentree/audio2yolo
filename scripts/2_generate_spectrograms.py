@@ -21,14 +21,15 @@ def generate_mel_spectrogram(audio_path, output_path, sr=44100, n_mels=128):
         # Konwersja do skali decybelowej (logarytmicznej) dla lepszej wizualizacji
         mel_spect_db = librosa.power_to_db(mel_spect, ref=np.max)
         
-        plt.figure(figsize=(10, 4), frameon=False)
-        plt.axis('off')
+        fig = plt.figure(figsize=(6.4, 6.4), dpi=100)
+        ax = plt.Axes(fig, [0., 0., 1., 1.])
+        ax.set_axis_off()
+        fig.add_axes(ax)
         
         librosa.display.specshow(mel_spect_db, sr=sr, hop_length=512, x_axis='time', y_axis='mel', cmap='magma')
 
-        plt.savefig(output_path, bbox_inches='tight', pad_inches=0, transparent=True)
-        
-        plt.close()
+        plt.savefig(output_path, pad_inches=0)
+        plt.close(fig)
         
     except Exception as e:
         print(f"Error processing file {audio_path}: {e}")
@@ -66,6 +67,10 @@ def process_all_classes(base_input_folder, base_output_folder):
             file_name = os.path.basename(audio_path)
             png_name = os.path.splitext(file_name)[0] + ".png"
             output_path = os.path.join(class_output_path, png_name)
+            
+            if os.path.exists(output_path):
+                print(f"  [{index}/{file_count}] [Skip] {png_name} (już istnieje)")
+                continue
             
             generate_mel_spectrogram(audio_path, output_path)
             print(f"  [{index}/{file_count}] Saved: {png_name}")
