@@ -16,18 +16,27 @@ def parse_input():
 
     parser.add_argument("--url", required=True)
     parser.add_argument("--class", dest="folder", required=True) #class jest slowem kluczowym, wiec nalezy przekierowac pod inna nazwe
+    parser.add_argument("--start", required=True)
+    parser.add_argument("--end", required=True)
 
     arguments = parser.parse_args()
 
     url = arguments.url
     folder = arguments.folder
+    start = arguments.start
+    end = arguments.end
 
     if(folder not in AVAILABLE_CLASSES):
         print(f"BŁĄD: Wpisana klasa nie istnieje")
         sys.exit(1)
-    return url, folder
 
-url, folder = parse_input()
+    if end <= start:
+        print(f"BŁĄD: Podany start klipu powinien byc szybciej niz podany koniec klipu")
+        sys.exit(1)
+    
+    return url, folder, start, end
+
+url, folder, start, end = parse_input()
 
 download_path = os.path.join(DOWNLOAD_FOLDER, folder)
 
@@ -45,12 +54,13 @@ download_options = {
     }],
 
     'postprocessor_args': [
+        '-ss', start,
+        '-to', end,
         '-ar', '44100',
         '-ac', '1'
     ]
 
 }
-
 
 try:
     with yt_dlp.YoutubeDL(download_options) as ydl:
