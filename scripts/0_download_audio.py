@@ -36,7 +36,7 @@ os.makedirs(download_path, exist_ok=True)
 download_options = {
     'format': 'bestaudio/best',
     'outtmpl': f'{download_path}/%(title)s.%(ext)s',
-    'ffmpeg_location': './scripts/ffmpeg',
+    # 'ffmpeg_location': './scripts/ffmpeg',
 
     'postprocessors': [{
         'key': 'FFmpegExtractAudio',
