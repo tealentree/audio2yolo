@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 
 # --- 1. KONFIGURACJA ---
 INPUT_FOLDER = "1_raw_audio/targets"
-DRONE_BG_FILE = "1_raw_audio/backgrounds/drone-sound.wav"
+DRONE_BG_FOLDER = "1_raw_audio/backgrounds"
 OUTPUT_FOLDER = "2_processed_audio"
 LABELS_OUTPUT_FOLDER = "3_spectrograms"
 
@@ -51,31 +51,47 @@ def bandpass_filter(audio, sr, low_freq=150, high_freq=10000):
 
     return filtfilt(b, a, audio)
 
-def prepare_drone_background(total_samples):
+def load_background_pool(folder_path):
     """
-    Laduje i zapetla dźwięk tla drona, aby dopasowac go do docelowej dlugosci probki. 
-    Zwieksza glosnosc bazowego dzwieku o okreslony mnoznik.
+    Wczytuje wszystkie pliki .wav z folderu z tłami do listy.
     """
-    try:
-        drone_noise, _ = librosa.load(DRONE_BG_FILE, sr=SAMPLE_RATE)
-        background_canvas = np.copy(drone_noise)
+    
+    bg_files = glob.glob(os.path.join(folder_path, "*.wav"))
+    bg_pool = []
+    
+    for file_path in bg_files:
+        try:
+            audio_data, _ = librosa.load(file_path, sr=SAMPLE_RATE)
+            bg_pool.append(audio_data)
+        except Exception as e:
+            print(f"Failed to load background {file_path}: {e}")
+    return bg_pool
+
+def get_random_background(bg_pool, total_samples):
+    """
+    Wybiera losowe tło z puli i wycina z niego losowy fragment o długości 30 sekund
+    """
+    if not bg_pool:
+        print("Błąd: Pula z tłami jest pusta")
+        return np.zeros(total_samples)
+    
+    selected_bg = random.choice(bg_pool)
+    background_canvas = np.copy(selected_bg)
+    
+    while len(background_canvas) < total_samples:
+        background_canvas = np.concatenate((background_canvas, background_canvas))
+    max_start_idx = len(background_canvas) - total_samples
+    
+    if max_start_idx > 0:
+        start_idx = random.randint(0, max_start_idx)
+    else:
+        start_idx = 0
         
-        while len(background_canvas) < total_samples:
-            background_canvas = np.concatenate((background_canvas, background_canvas))
-        
-        # Przytnij do dokładnie 30 sekund
-        start_time = 2.0
-        start_time = int(start_time * SAMPLE_RATE)
-        background_canvas = background_canvas[start_time:start_time + total_samples]
-        
-        # Zwiększ głośność tła, aby było bardziej wyraźne w miksie (mnożnik można dostosować)
-        background_canvas = background_canvas * 1.5 
-        return background_canvas
-        
-    except Exception as e:
-        print(f"Error loading drone background noise: {e}")
-        print(f"Please ensure the file exists at: {DRONE_BG_FILE}")
-        return None
+    background_canvas = background_canvas[start_idx:start_idx + total_samples]
+    return background_canvas
+    
+def prepare_drone_background(background_canvas, total_samples):
+    None
 
 def load_audio_pool(folder_path):
     """
@@ -149,8 +165,9 @@ def generate_dataset():
     total_samples = int(SAMPLE_DURATION_SEC * SAMPLE_RATE)
     
     # Bazowe tło drona, które będzie używane we wszystkich wariantach
-    base_background = prepare_drone_background(total_samples)
-    if base_background is None:
+    bg_pool = load_background_pool(DRONE_BG_FOLDER)
+    if not bg_pool:
+        print(f"Error: No background audio files found in {DRONE_BG_FOLDER}. Please add .wav files to this folder.")
         return
 
     for class_name, config in AUDIO_CLASSES.items():
@@ -172,7 +189,7 @@ def generate_dataset():
         file_id = 0
         for audio_id in range(len(audio_pool)):
             for version_idx in range(VERSIONS_PER_CLASS):
-                canvas = np.copy(base_background)
+                canvas = get_random_background(bg_pool, total_samples)
                 current_file_volume = random.uniform(0.1, 0.7)
 
                 event_registry = [] 
